@@ -39,6 +39,9 @@ distclean:
 eunit: compile
 	$(REBAR) eunit verbose=true
 
+cover:
+	$(REBAR) cover
+
 .PHONY: dialyzer
 dialyzer:
 	$(REBAR) dialyzer

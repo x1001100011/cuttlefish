@@ -129,10 +129,10 @@ generate_element(MappingRecord) ->
             [];
         commented ->
             Comments = generate_comments(MappingRecord),
-            Comments ++ [lists:flatten([ "## ", Field, " = ", cuttlefish_datatypes:to_string(Commented, Datatype) ]), ""];
+            Comments ++ [lists:flatten([ "## ", Field, " = ", cuttlefish_datatypes:to_quoted_string(Commented, Datatype) ]), ""];
         default ->
             Comments = generate_comments(MappingRecord),
-            Comments ++ [lists:flatten([ Field, " = ", cuttlefish_datatypes:to_string(Default, Datatype) ]), ""]
+            Comments ++ [lists:flatten([ Field, " = ", cuttlefish_datatypes:to_quoted_string(Default, Datatype) ]), ""]
     end.
 
 get_default(MappingRecord) ->
@@ -304,25 +304,26 @@ generate_comments_test() ->
 duplicates_test() ->
     Conf = file(tp("multi1.conf")),
     ?assertEqual(2, length(Conf)),
-    ?assertEqual("3", proplists:get_value(["a","b","c"], Conf)),
-    ?assertEqual("1", proplists:get_value(["a","b","d"], Conf)),
+    ?assertEqual(3, proplists:get_value(["a","b","c"], Conf)),
+    ?assertEqual(1, proplists:get_value(["a","b","d"], Conf)),
     ok.
 
 duplicates_multi_test() ->
     Conf = files([tp("multi1.conf"), tp("multi2.conf")]),
     ?assertEqual(2, length(Conf)),
-    ?assertEqual("4", proplists:get_value(["a","b","c"], Conf)),
-    ?assertEqual("1", proplists:get_value(["a","b","d"], Conf)),
+    ?assertEqual(4, proplists:get_value(["a","b","c"], Conf)),
+    ?assertEqual(1, proplists:get_value(["a","b","d"], Conf)),
     ok.
 
 files_one_nonent_test() ->
     Conf = files([tp("multi1.conf"), tp("nonent.conf")]),
-    ?assertEqual({errorlist,[{error, {file_open, {tp("nonent.conf"), enoent}}}]}, Conf),
+    ?assertEqual({errorlist,[{error, {file_open, {tp("nonent.conf"), {enoent, tp("nonent.conf")}}}}]}, Conf),
     ok.
 
 files_incomplete_parse_test() ->
     Conf = file(tp("incomplete.conf")),
-    ?assertEqual({errorlist, [{error, {conf_syntax, {tp("incomplete.conf"), {3, 1}}}}]}, Conf),
+    ErrorInfo = iolist_to_binary(io_lib:format("syntax error before:  in_file ~p at_line 3.", [tp("incomplete.conf")])),
+    ?assertEqual({errorlist, [{error, {file_open, {tp("incomplete.conf"), {parse_error, ErrorInfo}}}}]}, Conf),
     ok.
 
 generate_element_level_advanced_test() ->

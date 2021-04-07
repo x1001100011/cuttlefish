@@ -29,15 +29,15 @@
         end).
 
 -define(capturing(__Forms),
-        begin
-            ___OldLeader = group_leader(),
-            group_leader(cuttlefish_test_group_leader:new_group_leader(self()), self()),
-            try
-                __Forms
-            after
-                cuttlefish_test_group_leader:tidy_up(___OldLeader)
-            end
-        end).
+    (fun() ->
+        ___OldLeader = group_leader(),
+        group_leader(cuttlefish_test_group_leader:new_group_leader(self()), self()),
+        try
+            __Forms
+        after
+            cuttlefish_test_group_leader:tidy_up(___OldLeader)
+        end
+     end)()).
 
 describe_test_() ->
      [
@@ -97,6 +97,35 @@ describe_prints_not_configured() ->
                    Text = "Value not set in " ++ tp("riak.conf"),
                    ?assertPrinted(Text)
                end).
+
+
+get_test_() ->
+  [
+    {"`cuttlefish get` prints value", fun get_prints/0},
+    {"`cuttlefish get` prints datatype's valid values", fun get_prints_nothing/0}
+  ].
+
+get_(Key) ->
+  cuttlefish_escript:main(["-i", tp("riak.schema"), "-c", tp("riak.conf"), "get", Key]).
+
+get_prints() ->
+  ?capturing(begin
+               get_("ring_size"),
+               {ok, Stdout} = cuttlefish_test_group_leader:get_output(),
+               ?assertEqual([["32", $\n]], Stdout)
+             end),
+  ?capturing(begin
+               get_("listener.http.internal"),
+               {ok, Stdout} = cuttlefish_test_group_leader:get_output(),
+               ?assertEqual([["127.0.0.1:8098", $\n]], Stdout)
+             end).
+
+get_prints_nothing() ->
+  ?capturing(begin
+               ?assertThrow(stop_deactivate, get_("ssl.keyfile")),
+               {ok, Stdout} = cuttlefish_test_group_leader:get_output(),
+               ?assertEqual([], Stdout)
+             end).
 
 %% test-path
 tp(Name) ->

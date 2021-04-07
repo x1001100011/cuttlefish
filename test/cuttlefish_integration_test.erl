@@ -10,7 +10,7 @@ generated_conf_file_test() ->
     cuttlefish_conf:generate_file(Mappings, "../generated.conf"),
     %% Schema generated a conf file, let's parse it!
     Conf = cuttlefish_conf:file("../generated.conf"),
-    ?assertEqual("8099", proplists:get_value(["handoff","port"], Conf)),
+    ?assertEqual(8099, proplists:get_value(["handoff","port"], Conf)),
     ok.
 
 %% This test generates a .config file from the riak.schema. view it at ../generated.config
@@ -162,13 +162,13 @@ duration_test() ->
 
     %% Test that the duration parsing doesn't emit "error" into the
     %% config instead of the extended type.
-    Conf = conf_parse:parse(<<"a.b.c = foo\n">>),
+    {ok, Conf} = hocon:binary(<<"a.b.c = foo\n">>, #{format => proplists}),
     NewConfig = cuttlefish_generator:map(Schema, Conf),
     ?assertEqual(foo, proplists:get_value(duration_extended, proplists:get_value(cuttlefish, NewConfig))),
 
     %% Test that for a non-extended duration, a bad value results in
     %% an erroroneous config, not emitting error.
-    Conf2 = conf_parse:parse(<<"b.c = fish\n">>),
+    {ok, Conf2} = hocon:binary(<<"b.c = fish\n">>, #{format => proplists}),
     ErrConfig = cuttlefish_generator:map(Schema, Conf2),
     ?assertMatch({error, transform_datatypes, _}, ErrConfig).
 

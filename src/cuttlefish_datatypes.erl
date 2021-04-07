@@ -193,6 +193,16 @@ to_string(Value, MaybeExtendedDatatype) ->
             {error, {type, {Value, MaybeExtendedDatatype}}}
     end.
 
+-spec to_quoted_string(term(), datatype()) -> string() | cuttlefish_error:error().
+to_quoted_string(V, Type) when Type =:= ip; Type =:= string;
+                               element(1, Type) =:= enum; element(1, Type) =:= duration;
+                               Type =:= bytesize; Type =:= file; Type =:= directory ->
+  quote(to_string(V, Type));
+to_quoted_string(V, Type) ->
+  to_string(V, Type).
+
+quote(Text) when is_list(Text) -> "\"" ++ Text ++ "\"".
+
 -spec from_string(term(), datatype()) -> term() | cuttlefish_error:error().
 from_string(Atom, atom) when is_atom(Atom) -> Atom;
 from_string(String, atom) when is_list(String) -> list_to_atom(String);

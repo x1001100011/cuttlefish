@@ -32,14 +32,6 @@
 -endif.
 
 -include("cuttlefish.hrl").
--define(ENVS, [{"EMQX_NODE_NAME", "node.name"},
-               {"EMQX_NODE_COOKIE", "node.cookie"},
-               {"EMQX_MAX_PORTS", "node.max_ports"},
-               {"EMQX_MAX_PACKET_SIZE", "mqtt.max_packet_size"},
-               {"EMQX_TCP_PORT", "listener.tcp.external"},
-               {"EMQX_SSL_PORT", "listener.ssl.external"},
-               {"EMQX_WS_PORT", "listener.ws.external"},
-               {"EMQX_WSS_PORT", "listener.wss.external"}]).
 
 cli_options() ->
 %% Option Name, Short Code, Long Code, Argument Spec, Help Message
@@ -109,6 +101,8 @@ main(Args) ->
             effective(ParsedArgs);
         describe ->
             describe(ParsedArgs, Extra);
+        get ->
+            get(ParsedArgs, Extra);
         _Other ->
             print_help()
     end.
@@ -170,30 +164,20 @@ describe(_ParsedArgs, []) ->
     ?STDOUT("Try `describe setting.name`", []),
     stop_deactivate();
 describe(ParsedArgs, [Query|_]) when is_list(Query) ->
-    QDef = cuttlefish_variable:tokenize(Query),
-
     ?logger:debug("cuttlefish describe '~s'", [Query]),
     {_, Mappings, _} = load_schema(ParsedArgs),
 
-    FindResults = fun(QueryVar) ->
-    lists:filter(
-        fun(X) ->
-            cuttlefish_variable:is_fuzzy_match(QueryVar, cuttlefish_mapping:variable(X))
-        end,
-        Mappings)
-    end,
-
-    case FindResults(QDef) of
-        [] ->
+    case match(ParsedArgs, Query) of
+        {error, notfound}->
             ?STDOUT("Variable '~s' not found", [Query]);
-        [Match|_] ->
+        {ok, Match} ->
             ?STDOUT("Documentation for ~s", [cuttlefish_variable:format(cuttlefish_mapping:variable(Match))]),
             _ = case {cuttlefish_mapping:doc(Match), cuttlefish_mapping:see(Match)} of
                 {[], []} ->
                     ok;
                 {[], See} ->
                     _ = [ begin
-                          M = hd(FindResults(S)),
+                          M = hd(find_results(S, Mappings)),
                           [ ?STDOUT("~s", [Line]) || Line <- cuttlefish_mapping:doc(M)]
                     end || S <- See],
                     ok;
@@ -218,7 +202,7 @@ describe(ParsedArgs, [Query|_]) when is_list(Query) ->
                     ?STDOUT("   No default set", [])
             end,
             Conf = load_conf(ParsedArgs),
-            case lists:keyfind(QDef, 1, Conf) of
+            case lists:keyfind(cuttlefish_variable:tokenize(Query), 1, Conf) of
                 false ->
                     ConfFile = proplists:get_value(conf_file, ParsedArgs),
                     ?STDOUT("   Value not set in ~s", [ConfFile]);
@@ -230,14 +214,60 @@ describe(ParsedArgs, [Query|_]) when is_list(Query) ->
     end,
     stop_deactivate().
 
+%% This is the function that dumps the value for a single setting.
+%% To be shell friendly, it returns nothing when something is wrong.
+get(_ParsedArgs, []) ->
+    %% No query, you get nothing.
+    ?logger:debug("cuttlefish's get command required a variable to query.", []),
+    ?logger:debug("Try `get setting.name`", []),
+    stop_deactivate();
+get(ParsedArgs, [Query|_]) when is_list(Query) ->
+    ?logger:debug("cuttlefish get '~s'", [Query]),
+    case match(ParsedArgs, Query) of
+        {error, notfound} ->
+            ?logger:debug("Variable '~s' not found", [Query]),
+            stop_deactivate();
+        {ok, Match} ->
+            Conf = load_conf(ParsedArgs),
+            case lists:keyfind(cuttlefish_variable:tokenize(Query), 1, Conf) of
+                false ->
+                    ConfFile = proplists:get_value(conf_file, ParsedArgs),
+                    ?logger:debug("Value not set in ~s", [ConfFile]),
+                    stop_deactivate();
+                {_, CValue} ->
+                    ConfiguredValue = format_datatype(CValue, cuttlefish_mapping:datatype(Match)),
+                    ?STDOUT("~s", [unquote(ConfiguredValue)])
+            end
+    end,
+    stop_ok().
+
+unquote([$" | Str]) ->
+    string:strip(Str, trailing, $");
+unquote(Str) ->
+    Str.
+
+match(ParsedArgs, Query) ->
+    {_, Mappings, _} = load_schema(ParsedArgs),
+    case find_results(cuttlefish_variable:tokenize(Query), Mappings) of
+        [] ->
+            {error, notfound};
+        [Match|_] ->
+            {ok, Match}
+    end.
+
+find_results(QueryVar, Mappings) ->
+    lists:filter(
+        fun(X) ->
+            cuttlefish_variable:is_fuzzy_match(QueryVar, cuttlefish_mapping:variable(X))
+        end,
+        Mappings).
+
 -ifndef(TEST).
 stop_deactivate() ->
-    init:stop(1),
-    timer:sleep(250),
-    stop_deactivate().
+    erlang:halt(1).
 
 stop_ok() ->
-    init:stop(0).
+    erlang:halt(0).
 -endif.
 
 -ifdef(TEST).
@@ -331,25 +361,6 @@ load_conf(ParsedArgs) ->
             GoodConf
     end.
 
-change_conf(Conf) ->
-    change_conf(Conf, ?ENVS).
-
-change_conf(Conf, []) ->
-    Conf;
-change_conf(Conf, [{Env, Key} | Envs]) ->
-    case os:getenv(Env) of
-        false -> change_conf(Conf, Envs);
-        Value ->
-            NKey = cuttlefish_variable:tokenize(Key),
-            NConf = case lists:keyfind(NKey, 1, Conf) of
-                false -> Conf ++ [{NKey, Value}];
-                _ -> lists:keyreplace(NKey, 1, Conf, {NKey, Value})
-            end,
-            change_conf(NConf, Envs)
-    end.
-
-
-
 -spec writable_destination_path([proplists:property()]) -> file:filename() | error.
 writable_destination_path(ParsedArgs) ->
     EtcDir = proplists:get_value(etc_dir, ParsedArgs),
@@ -394,7 +405,7 @@ engage_cuttlefish(ParsedArgs) ->
 
     Schema = load_schema(ParsedArgs),
     ConfFile = proplists:get_value(conf_file, ParsedArgs),
-    Conf = change_conf(load_conf(ParsedArgs)),
+    Conf = load_conf(ParsedArgs),
     NewConfig = case cuttlefish_generator:map(Schema, Conf, ConfFile) of
         {error, Phase, {errorlist, Errors}} ->
             ?logger:error("Error generating configuration in phase ~s", [Phase]),
