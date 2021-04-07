@@ -828,7 +828,7 @@ add_defaults_test() ->
 map_test() ->
     Schema = cuttlefish_schema:file(tp("riak.schema")),
 
-    Conf = conf_parse:file(tp("riak.conf")),
+    {ok, Conf} = hocon:load(tp("riak.conf"), #{format => proplists}),
 
     NewConfig = map(Schema, Conf),
 

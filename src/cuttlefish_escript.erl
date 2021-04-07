@@ -236,10 +236,15 @@ get(ParsedArgs, [Query|_]) when is_list(Query) ->
                     stop_deactivate();
                 {_, CValue} ->
                     ConfiguredValue = format_datatype(CValue, cuttlefish_mapping:datatype(Match)),
-                    ?STDOUT("~s", [ConfiguredValue])
+                    ?STDOUT("~s", [unquote(ConfiguredValue)])
             end
     end,
     stop_ok().
+
+unquote([$" | Str]) ->
+    string:strip(Str, trailing, $");
+unquote(Str) ->
+    Str.
 
 match(ParsedArgs, Query) ->
     {_, Mappings, _} = load_schema(ParsedArgs),

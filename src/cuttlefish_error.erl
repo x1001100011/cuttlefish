@@ -94,7 +94,7 @@ xlate({conf_to_latin1, LineNum}) ->
 xlate({bytesize_parse, Value}) ->
     io_lib:format("Error converting value ~p to a number of bytes", [Value]);
 xlate({file_open, {File, Reason}}) ->
-    io_lib:format("Could not open file (~s) for Reason ~s", [File, Reason]);
+    io_lib:format("Could not open file (~s) for Reason ~p", [File, Reason]);
 xlate({conf_syntax, {File, {Line, Col}}}) ->
     io_lib:format("Syntax error in ~s after line ~p column ~p, "
                   "parsing incomplete", [File, Line, Col]);

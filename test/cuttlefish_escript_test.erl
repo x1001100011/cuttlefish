@@ -33,9 +33,9 @@
         ___OldLeader = group_leader(),
         group_leader(cuttlefish_test_group_leader:new_group_leader(self()), self()),
         try
-          __Forms
+            __Forms
         after
-          cuttlefish_test_group_leader:tidy_up(___OldLeader)
+            cuttlefish_test_group_leader:tidy_up(___OldLeader)
         end
      end)()).
 

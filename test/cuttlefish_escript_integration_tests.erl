@@ -13,7 +13,7 @@ escript_utf8_test() ->
               " -c " ++ fixtures("escript_utf8_test/etc/utf8.conf generate")
             )),
     [Log] = cuttlefish_test_logger:get_logs(),
-    ?assertMatch({match, _}, re:run(Log, "utf8.conf: Error converting value on line #1 to latin1")),
+    ?assertMatch({match, _}, re:run(Log, "scan_error")),
     ok.
 
 
