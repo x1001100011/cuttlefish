@@ -46,7 +46,8 @@ cli_options() ->
  {app_config,   $a, "app_config",  string,             "the advanced erlangy app.config"},
  {log_level,    $l, "log_level",   {string, "notice"}, "log level for cuttlefish output"},
  {print_schema, $p, "print",       undefined,          "prints schema mappings on stderr"},
- {max_history,  $m, "max_history", {integer, 3},       "the maximum number of generated config files to keep"}
+ {max_history,  $m, "max_history", {integer, 3},       "the maximum number of generated config files to keep"},
+ {verbose_env,  $v, "verbose_env", {boolean, false},   "whether to log env overrides to stdout"}
 ].
 
 %% LOL! I wanted this to be halt 0, but honestly, if this escript does anything
@@ -401,7 +402,13 @@ engage_cuttlefish(ParsedArgs) ->
     Schema = load_schema(ParsedArgs),
     ConfFile = proplists:get_value(conf_file, ParsedArgs),
     Conf = load_conf(ParsedArgs),
-    NewConfig = case cuttlefish_generator:map(Schema, Conf, ConfFile) of
+    LogFun = case proplists:get_value(verbose_env, ParsedArgs) of
+        true ->
+            fun(Key, Value) -> ?STDOUT("~s = ~p", [string:join(Key, "."), Value]) end;
+        false ->
+            fun(_, _) -> ok end
+    end,
+    NewConfig = case cuttlefish_generator:map(Schema, Conf, ConfFile, LogFun) of
         {error, Phase, {errorlist, Errors}} ->
             ?logger:error("Error generating configuration in phase ~s", [Phase]),
             _ = [ cuttlefish_error:print(E) || E <- Errors],
