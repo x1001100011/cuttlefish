@@ -39,6 +39,24 @@
         end
      end)()).
 
+generate_test_() ->
+    [
+        {"`cuttlefish generate` prints override", fun generate_prints_override/0}
+    ].
+
+generate_prints_override() ->
+    os:putenv("CUTTLEFISH_ENV_OVERRIDE_PREFIX", "EUNIT_"),
+    os:putenv("EUNIT_SYSLOG", "off"),
+    ?capturing(begin
+                   cuttlefish_escript:main(["-i", tp("override_and_fuzzy.schema"),
+                                            "-c", tp("override_and_fuzzy.conf"),
+                                            "-d", tp("override_and_fuzzy"),
+                                            "-v"]),
+                   ?assertPrinted("log.syslog = \"off\"")
+               end),
+    os:unsetenv("CUTTLEFISH_ENV_OVERRIDE_PREFIX"),
+    os:unsetenv("EUNIT_SYSLOG").
+
 describe_test_() ->
      [
       {"`cuttlefish describe` prints documentation", fun describe_prints_docs/0},
