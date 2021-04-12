@@ -1,0 +1,11 @@
+{mapping, "log.syslog", "lager.handlers", [
+  {default, off},
+  {datatype, {enum, [on, off]}},
+  {override_env, "SYSLOG"}
+]}.
+
+{mapping, "listener.http.$name", "riak_core.http", [
+  {default, {"127.0.0.1",8098}},
+  {datatype, ip},
+  {include_default, "internal"}
+]}.
