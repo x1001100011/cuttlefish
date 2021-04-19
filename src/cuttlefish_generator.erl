@@ -33,7 +33,7 @@
 -define(LSUBLEN, 2).
 -define(RSUBLEN, 1).
 
--export([map/2, map/3, map/4, merge_env_conf/3, find_mapping/2, add_defaults/2, minimal_map/2]).
+-export([map/2, map/3, map/4, merge_env_conf/2, merge_env_conf/3, find_mapping/2, add_defaults/2, minimal_map/2]).
 
 -include("cuttlefish.hrl").
 
@@ -52,12 +52,16 @@ map(Schema, Config, ConfFile, LogFun) ->
     AllConfig = merge_env_conf(IncludedConfig, Schema, LogFun),
     map_add_defaults(Schema, AllConfig).
 
+merge_env_conf(Config, Schema) ->
+    merge_env_conf(Config, Schema, fun (_, _) -> ok end).
+
 -spec (merge_env_conf(cuttlefish_conf:conf(),
                       cuttlefish_schema:schema(),
                       fun (([{[string()], string()}]) -> any())) -> cuttlefish_conf:conf()).
 merge_env_conf(Config, Schema, LogFun) ->
-    Envs = match_env(getenv(), Schema, LogFun),
-    lists:ukeymerge(1, Envs, Config).
+    {ActiveEnvs, KeysToDelete} = match_env(getenv(), Schema, LogFun),
+    Config0 = lists:foldl(fun (Key, A) -> lists:keydelete(Key, 1, A) end, Config, KeysToDelete),
+    lists:ukeymerge(1, ActiveEnvs, Config0).
 
 -spec (getenv() -> cuttlefish_conf:conf()).
 getenv() ->
@@ -70,7 +74,9 @@ match_env(AllEnvs, {_, Mappings, _}, LogFun) ->
     Override = lists:ukeysort(1, match_override_env(Envs, Mappings)),
     Active = lists:ukeymerge(1, Override, Default),
     _ = [LogFun(Key, Value) || {Key, Value} <- Active],
-    Active.
+    ActiveEnvs = lists:filter(fun ({_, ""}) -> false; (_) -> true end, Active),
+    KeysToDelete = lists:filtermap(fun ({K, ""}) -> {true, K}; (_) -> false end, Active),
+    {ActiveEnvs, KeysToDelete}.
 
 match_default_env(Envs, Mappings) ->
     lists:filtermap(fun (KV) -> do_match_default_env(KV, Mappings) end, Envs).
@@ -1348,25 +1354,41 @@ env_override_test() ->
     Translations = [
         cuttlefish_translation:parse({translation, "fuzzykey", fun([{_K, V}]) -> V end})
     ],
-    os:putenv("EMQX_SOME__KEY", "foo_override"),
-    os:putenv("EMQX_OTHER__KEY", "ignored"),
-    os:putenv("EMQX_OVERRIDE_IT", "bar_override"),
-    os:putenv("EMQX_FUZZY__KEY__1", "baz_override"),
+    Envs = [{"EMQX_SOME__KEY", "foo_override"},
+            {"EMQX_OTHER__KEY", "ignored"},
+            {"EMQX_OVERRIDE_IT", "bar_override"},
+            {"EMQX_FUZZY__KEY__1", "baz_override"},
+            {"CUTTLEFISH_ENV_OVERRIDE_PREFIX", "EMQX_"}],
 
-    os:putenv("CUTTLEFISH_ENV_OVERRIDE_PREFIX", "EMQX_"),
+    NewConfig = with_envs(fun map/2, [{Translations, Mappings, []}, Conf], Envs),
+    ?assertEqual("foo_override", proplists:get_value(somekey, NewConfig)),
+    ?assertEqual("bar_override", proplists:get_value(otherkey, NewConfig)),
+    ?assertEqual("baz_override", proplists:get_value(fuzzykey, NewConfig)),
+    ok.
 
-    try
-        NewConfig = map({Translations, Mappings, []}, Conf),
-        ?assertEqual("foo_override", proplists:get_value(somekey, NewConfig)),
-        ?assertEqual("bar_override", proplists:get_value(otherkey, NewConfig)),
-        ?assertEqual("baz_override", proplists:get_value(fuzzykey, NewConfig))
-    after
-        os:unsetenv("EMQX_SOME__KEY"),
-        os:unsetenv("EMQX_OTHER__KEY"),
-        os:unsetenv("OVERRIDE_IT"),
-        os:unsetenv("EMQX_FUZZY__KEY__1"),
-        os:unsetenv("CUTTLEFISH_ENV_OVERRIDE_PREFIX")
-    end,
+env_override_unset_test() ->
+    Conf = [
+        {["some", "key"], "foo"},
+        {["other", "key"], "bar"}
+    ],
+
+    Mappings = [
+        cuttlefish_mapping:parse({mapping, "some.key", "somekey", [
+            {datatype, string}
+        ]}),
+        cuttlefish_mapping:parse({mapping, "other.key", "otherkey", [
+            {datatype, string},
+            {default, "default value"}
+        ]})
+    ],
+
+    Envs = [{"EMQX_SOME__KEY", ""},
+            {"EMQX_OTHER__KEY", ""},
+            {"CUTTLEFISH_ENV_OVERRIDE_PREFIX", "EMQX_"}],
+
+    NewConfig = with_envs(fun map/2, [{[], Mappings, []}, Conf], Envs),
+    ?assertEqual(undefined, proplists:get_value(somekey, NewConfig)),
+    ?assertEqual("default value", proplists:get_value(otherkey, NewConfig)),
     ok.
 
 env_fuzzy_override_error_test() ->
@@ -1380,19 +1402,32 @@ env_fuzzy_override_error_test() ->
             {override_env, "OVERRIDE"}
         ]})
     ],
-    os:putenv("EMQX_OVERRIDE", "foo"),
-    os:putenv("CUTTLEFISH_ENV_OVERRIDE_PREFIX", "EMQX_"),
 
-    try
-        ?assertError({no_env_override_support_for_fuzzy_mappings, _}, map({[], Mappings, []}, Conf))
-    after
-        os:unsetenv("EMQX_OVERRIDE"),
-        os:unsetenv("CUTTLEFISH_ENV_OVERRIDE_PREFIX")
-    end,
+    Envs = [{"EMQX_OVERRIDE", "foo"}, {"CUTTLEFISH_ENV_OVERRIDE_PREFIX", "EMQX_"}],
+    ?assertMatch({error, {no_env_override_support_for_fuzzy_mappings, _}},
+                 with_envs(fun map/2, [{[], Mappings, []}, Conf], Envs)),
     ok.
 
 %% test-path
 tp(Name) ->
     filename:join([code:lib_dir(cuttlefish), "test", Name]).
+
+with_envs(Fun, Args, [{_Name, _Value} | _] = Envs) ->
+    set_envs(Envs),
+    try
+        Res = apply(Fun, Args),
+        unset_envs(Envs),
+        Res
+    catch
+        _:Reason ->
+            unset_envs(Envs),
+            {error, Reason}
+    end.
+
+set_envs([{_Name, _Value} | _] = Envs) ->
+    lists:map(fun ({Name, Value}) -> os:putenv(Name, Value) end, Envs).
+
+unset_envs([{_Name, _Value} | _] = Envs) ->
+    lists:map(fun ({Name, _}) -> os:unsetenv(Name) end, Envs).
 
 -endif.
